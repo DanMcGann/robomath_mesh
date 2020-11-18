@@ -22,6 +22,7 @@ class TestBallPivotFunctions(unittest.TestCase):
         e = Edge(cloud[0], cloud[1])
         kdtree = KDTree(cloud)
         _, nearest_neighbors = kdtree.query(cloud, k=10)
+        nearest_neighbors = nearest_neighbors[:, 1:]
         np.testing.assert_equal(bp.pivot(cloud, nearest_neighbors, e), cloud[2])
 
     def test_pivot_no_solution(self):
@@ -30,6 +31,7 @@ class TestBallPivotFunctions(unittest.TestCase):
         e = Edge(cloud[0], cloud[1])
         kdtree = KDTree(cloud)
         _, nearest_neighbors = kdtree.query(cloud, k=10)
+        nearest_neighbors = nearest_neighbors[:, 1:]
         self.assertIsNone(bp.pivot(cloud, nearest_neighbors, e))
 
     def test_pivot_two_solutions(self):
@@ -38,4 +40,5 @@ class TestBallPivotFunctions(unittest.TestCase):
         e = Edge(cloud[0], cloud[1])
         kdtree = KDTree(cloud)
         _, nearest_neighbors = kdtree.query(cloud, k=10)
+        nearest_neighbors = nearest_neighbors[:, 1:]
         np.testing.assert_equal(bp.pivot(cloud, nearest_neighbors, e), cloud[3])

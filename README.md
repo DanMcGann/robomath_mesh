@@ -14,6 +14,8 @@ Code for Robomath final project exploring mesh generation from pointclouds.
 * python3
 * python-pcl
     * `apt-get install python3-pcl` note: the pip version doesn't appear to work
+* pymesh
+    * `pip3 install pymesh`
 
 # Formatting
 * https://pypi.org/project/black/

@@ -1,11 +1,12 @@
 """
 Implementation of the ball pivot Algorithm from...
 https://ieeexplore.ieee.org/document/817351
+https://pdfs.semanticscholar.org/8ec0/d70299f83ccb98ad593a1b581deb018cbfe2.pdf
 """
 import numpy as np
 from queue import Queue
 from typing import NamedTuple
-from mesh_algos.mesh_algo import MeshAlgo
+from mesh_algos.mesh_algo import MeshAlgo, Point
 from scipy.spatial import KDTree
 
 """
@@ -15,8 +16,7 @@ Data Definitions
 # Each point the index of a point in the cloud
 Edge = NamedTuple("Edge", [("p1", np.ndarray), ("p2", np.ndarray)])
 
-# A point in the cloud of form [x,y,z]
-Point = np.ndarray
+
 
 # NeareastNeighborMatrix
 # A ndarray where the ith row lists the indicies of the nearest neighbors of the ith point in the cloud
@@ -50,6 +50,8 @@ class BallPivot(MeshAlgo):
         # Pre-Calculate the Knn for the cloud using a KD tree
         kdtree = KDTree(cloud)
         _, nearest_neighbors = kdtree.query(cloud, k=10)
+        # Remove self points from nn
+        nearest_neighbors = nearest_neighbors[:,1:]
 
         while not complete:
             while not active_edges.empty():
