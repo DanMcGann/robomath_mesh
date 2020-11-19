@@ -5,11 +5,12 @@ This file contains a base class for all the mesh generation algorithms.
 
 """
 from abc import ABC
-from pymesh import save_mesh_raw
+import pymesh
 
 import numpy as np
 import pcl
 import typing
+from collections import OrderedDict
 
 """
 Data Definitions
@@ -24,24 +25,36 @@ Triangle = typing.Tuple[Point, Point, Point]
 
 class Mesh:
     """
-    Class that defines a mesh
+    Class that defines a mesh.
+    Pymesh handles the unparsing to files. We just need to provide
+        - List of vertices
+        - List of faces defined by three indices corresponding to the vertices of the face
     """
 
-    # Need: List of Vertices (Points)
-    # Need: List of Faces (indices of points that make up each face)
-    def add_triangle(self, t: Triangle):
+    def __init__(self):
+        # Point -> idx
+        self.vertices = OrderedDict()
+        # List of np.ndarray[idx, idx, idx]
+        self.faces = []
+
+    def add_triangle(self, triangle: Triangle):
         """
         Adds a Triangle to the Mesh
         """
-        pass
+        vert_indices = []
+        for p in triangle:
+            if p not in self.vertices:
+                self.vertices[p] = len(self.vertices)
+            vert_indices.append(self.vertices[p])
+        self.faces.append(np.array(vert_indices))
 
     def save_mesh(self, out_file: str):
         """
         Saves a generated mesh to file
         """
-        vertices = None
-        faces = None
-        save_mesh_raw(out_file, vertices, faces)
+        vertices = np.stack(self.vertices.keys())
+        faces = np.stack(self.faces)
+        pymesh.save_mesh_raw(out_file, vertices, faces)
 
 
 """
