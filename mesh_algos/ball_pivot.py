@@ -81,20 +81,27 @@ class BallPivot(MeshAlgo):
         Constructor:
             - ball_radius: The radius (m) of the ball that will be used to pivot over the cloud
         """
+        self.mesh = Mesh()
         self._rad = ball_radius
+        self.cloud = np.array([])
+        self.active_edges = Queue()
+        self.used_points = set()
+        self.front_edges = set()
+        self.inactive_edges = set()
+        self.nearest_neighbors = np.array([])
 
     def generate_mesh(self, cloud: np.ndarray) -> Mesh:
         """ Required from @MeshAlgo"""
-        # The mesh that we are generating
-        mesh = Mesh()
+        # RESET THE STATE VARIABLES
+        self.cloud = cloud
         # Queue of Edges
-        active_edges = Queue()
+        self.active_edges = Queue()
         # Set of indices of points already added to the mesh
-        used_points = set()  # Set(int)
+        self.used_points = set()  # Set(int)
         # Set of frozensets each containing the indices of two points the front
-        front_edges = set()  # Set(fronzenset(int, int))
+        self.front_edges = set()  # Set(fronzenset(int, int))
         # Set of forzensets that are either boundary edges or interior edges
-        inactive_edges = set()  # Set(frozenset(int, int))
+        self.inactive_edges = set()  # Set(frozenset(int, int))
         # Flag indicating whether or not the algorithm has completed
         complete = False
 
@@ -102,52 +109,46 @@ class BallPivot(MeshAlgo):
         kdtree = KDTree(cloud)
         _, nearest_neighbors = kdtree.query(cloud, k=10)
         # Remove self points from nn
-        nearest_neighbors = nearest_neighbors[:, 1:]
+        self.nearest_neighbors = nearest_neighbors[:, 1:]
 
         while not complete:
-            while not active_edges.empty():
-                edge = active_edges.get()
-                if edge not in inactive_edges:
-                    third_point_idx = self.pivot(cloud, nearest_neighbors, edge)
+            while not self.active_edges.empty():
+                edge = self.active_edges.get()
+                if edge not in self.inactive_edges:
+                    third_point_idx = self.pivot(edge)
 
                     if (third_point_idx) and (
-                        (third_point_idx not in used_points)
-                        or (self.in_front(third_point_idx, front_edges))
+                        (third_point_idx not in self.used_points)
+                        or (self.in_front(third_point_idx))
                     ):
-                        self.add_triangle(
-                            mesh, cloud, edge, third_point_idx, front_edges, used_points
-                        )
+                        self.add_triangle(edge, third_point_idx)
                     else:
-                        inactive_edges.add(edge)
+                        self.inactive_edges.add(edge)
 
-            new_seed = self.find_seed_triangle(cloud, used_points)
+            new_seed = self.find_seed_triangle()
             if new_seed:
                 p1, p2, p3 = new_seed
-                self.add_triangle(
-                    mesh, cloud, Edge(p1, p2), p3, used_points, front_edges
-                )
+                self.add_triangle(Edge(p1, p2), p3)
                 # Add the edges to the queue
-                active_edges.put(Edge(p1, p2))  # TODO ADD CENTER HERE
-                active_edges.put(Edge(p1, p3))
-                active_edges.put(Edge(p2, p3))
+                self.active_edges.put(Edge(p1, p2))  # TODO ADD CENTER HERE
+                self.active_edges.put(Edge(p1, p3))
+                self.active_edges.put(Edge(p2, p3))
                 # Add the edges to the front
-                front_edges.add(Edge(p1, p2))
-                front_edges.add(Edge(p1, p3))
-                front_edges.add(Edge(p2, p3))
+                self.front_edges.add(Edge(p1, p2))
+                self.front_edges.add(Edge(p1, p3))
+                self.front_edges.add(Edge(p2, p3))
             else:
                 complete = True
 
-        return mesh
+        return self.mesh
 
-    def in_front(self, pi: int, front: set):
+    def in_front(self, pi: int):
         """
         Returns true iff the point index is contained in any of the edges of the front
         """
-        return pi in frozenset().union(*list(front))
+        return pi in frozenset().union(*list(self.front_edges))
 
-    def pivot(
-        self, cloud: np.ndarray, nearest_neighbors: np.ndarray, edge: Edge
-    ) -> int:
+    def pivot(self, edge: Edge) -> int:
         """
         Pivot Operation. Pivots the "ball" around the given edge
         and returns the first point that contacts the ball such that the ball contains
@@ -160,17 +161,17 @@ class BallPivot(MeshAlgo):
             The index of the first good point if it exists or None
         """
         # Get the indices of the nearest neighbors
-        nn = nearest_neighbors[edge.p1] + nearest_neighbors[edge.p2]
+        nn = self.nearest_neighbors[edge.p1] + self.nearest_neighbors[edge.p2]
         # Remove indies that are too large (filler in the nn matrix)
-        nn = [n for n in nn if n == len(cloud)]
+        nn = [n for n in nn if n == len(self.cloud)]
 
-        C = cloud[edge.p1]  # Point C in the triangle
-        B = cloud[edge.p2]  # Point B in the triangle
+        C = self.cloud[edge.p1]  # Point C in the triangle
+        B = self.cloud[edge.p2]  # Point B in the triangle
 
         # For each nn point calculate the ball if it exists
         bcent_point_pairs = []
         for pi in nn:
-            A = cloud[pi]
+            A = self.cloud[pi]
             # Calculate the circum radius To determine if the point can form a triangle
             circumcenter, circumrad = calc_circumcircle(A, B, C)
             if circumrad <= self._rad:
@@ -206,7 +207,7 @@ class BallPivot(MeshAlgo):
         # Iterate over the ordered pairs, return the first one that doesnt violate any condtions
         for pi, center in upper_pairs + lower_pairs:
             distances = [
-                euclidean(cloud[n], center)
+                euclidean(self.cloud[n], center)
                 for n in nn
                 if (n != edge.p1) and (n != edge.p2) and (n != pi)
             ]
@@ -214,15 +215,7 @@ class BallPivot(MeshAlgo):
                 return pi
         return None
 
-    def add_triangle(
-        self,
-        mesh: int,
-        cloud: np.ndarray,
-        edge: Edge,
-        point_index: int,
-        front: set,
-        used_pts: set,
-    ) -> None:
+    def add_triangle(self, edge: Edge, point_index: int) -> None:
         """
         Adds a triangle constructed from Edge and point to the mesh
 
@@ -236,9 +229,29 @@ class BallPivot(MeshAlgo):
         Returns:
             nothing
         """
-        pass  # TODO
+        # Add the triangle to the mesh
+        self.mesh.add_triangle(
+            (self.cloud[point_index], self.cloud[edge.p1], self.cloud[edge.p2])
+        )
+        # House keep the tracking information
+        self.used_points.add(point_index)
 
-    def find_seed_triangle(self, cloud: np.ndarray, used_points: set):
+        # For the two new edges check if they need to get added to the front
+        for new_edge in [
+            frozenset(point_index, edge.p1),
+            frozenset(point_index, edge.p2),
+        ]:
+            if new_edge in self.front_edges:
+                self.front_edges.remove(new_edge)
+                self.inactive_edges.add(new_edge)
+            else:
+                self.front_edges.add(new_edge)
+                self.active_edges.put(new_edge)
+        # Remove the previous front edge from the front
+        self.front_edges.remove(frozenset(edge.p1, edge.p2))
+        self.inactive_edges.add(frozenset(edge.p1, edge.p2))
+
+    def find_seed_triangle(self):
         """
         Finds a seed triangle from the cloud consisting of points that are not yet used
 
@@ -249,4 +262,16 @@ class BallPivot(MeshAlgo):
         Returns:
             (p1,p2,p3) The points of the triangle OR None
         """
-        return (1, 2, 3)  # TODO
+        unused_pts = list(set(list(range(len(self.cloud)))) - self.used_points)
+        # Check all of our unsed points
+        for p in unused_pts:
+            # Look at their two closest neighbors
+            n1, n2 = self.nearest_neighbors[p][0:2]
+            if n1 < len(self.cloud) and n2 < len(self.cloud):
+                center, rad = calc_circumcircle(
+                    self.cloud[p], self.cloud[n1], self.cloud[n2]
+                )
+                if rad < self._rad:
+                    return (p, n2, n2)
+
+        return None
