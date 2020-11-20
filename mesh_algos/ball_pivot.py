@@ -9,6 +9,7 @@ from typing import NamedTuple, Tuple
 from mesh_algos.mesh_algo import MeshAlgo, Point, Mesh
 from mesh_algos.utils import euclidean, midpoint
 from scipy.spatial import KDTree
+import matplotlib.pyplot as plt
 
 """
 Data Definitions
@@ -41,6 +42,55 @@ Helper Functions
 """
 
 
+def set_axes_equal(ax):
+    # https://stackoverflow.com/questions/13685386/matplotlib-equal-unit-length-with-equal-aspect-ratio-z-axis-is-not-equal-to
+    """Make axes of 3D plot have equal scale so that spheres appear as spheres,
+    cubes as cubes, etc..  This is one possible solution to Matplotlib's
+    ax.set_aspect('equal') and ax.axis('equal') not working for 3D.
+
+    Input
+      ax: a matplotlib axis, e.g., as output from plt.gca().
+    """
+
+    x_limits = ax.get_xlim3d()
+    y_limits = ax.get_ylim3d()
+    z_limits = ax.get_zlim3d()
+
+    x_range = abs(x_limits[1] - x_limits[0])
+    x_middle = np.mean(x_limits)
+    y_range = abs(y_limits[1] - y_limits[0])
+    y_middle = np.mean(y_limits)
+    z_range = abs(z_limits[1] - z_limits[0])
+    z_middle = np.mean(z_limits)
+
+    # The plot bounding box is a sphere in the sense of the infinity
+    # norm, hence I call half the max range the plot radius.
+    plot_radius = 0.5 * max([x_range, y_range, z_range])
+
+    ax.set_xlim3d([x_middle - plot_radius, x_middle + plot_radius])
+    ax.set_ylim3d([y_middle - plot_radius, y_middle + plot_radius])
+    ax.set_zlim3d([z_middle - plot_radius, z_middle + plot_radius])
+
+
+def plot_pivot(title, a, b, c, center, radius, nn):
+    fig = plt.figure()
+    ax = fig.gca(projection="3d")
+
+    u, v = np.mgrid[0 : 2 * np.pi : 20 * 1j, 0 : np.pi : 10 * 1j]
+    sphere_x = center[0] + radius * np.cos(u) * np.sin(v)
+    sphere_y = center[1] + radius * np.sin(u) * np.sin(v)
+    sphere_z = center[2] + radius * np.cos(v)
+    ax.plot_wireframe(sphere_x, sphere_y, sphere_z, color="black", alpha=0.5)
+
+    ax.scatter(nn.T[0], nn.T[1], nn.T[2], c="b", alpha=0.5)
+    tri = np.stack([b, c])
+    ax.scatter(tri.T[0], tri.T[1], tri.T[2], c="orange", alpha=1)
+    ax.scatter([a[0]], [a[1]], [a[2]], c="pink", s=30, alpha=1)
+    set_axes_equal(ax)
+    plt.title(title)
+    plt.show()
+
+
 def calc_circumcircle(A: Point, B: Point, C: Point) -> Tuple[Point, float]:
     """
     Calculate the Circumcircle of the three points
@@ -64,8 +114,9 @@ def calc_triangle_normal(
     Calculate the normal for a triangle based its points and the normal of the previous triangle
     """
     # From two sides of the triangle we can get two potential normals
-    pos_norm = np.cross(a - b, a - c)
-    neg_norm = -pos_norm
+    cross = np.cross(a - b, a - c)
+    pos_norm = cross / np.linalg.norm(cross)
+    neg_norm = -cross / np.linalg.norm(cross)
     # return the normal that points in the same direction as the prev normal
     return pos_norm if (pos_norm @ prev_normal > 0) else neg_norm
 
@@ -107,36 +158,54 @@ class BallPivot(MeshAlgo):
 
         # Pre-Calculate the Knn for the cloud using a KD tree
         kdtree = KDTree(cloud)
-        _, nearest_neighbors = kdtree.query(cloud, k=10)
+        _, nearest_neighbors = kdtree.query(cloud, k=100)
         # Remove self points from nn
         self.nearest_neighbors = nearest_neighbors[:, 1:]
 
         while not complete:
             while not self.active_edges.empty():
                 edge = self.active_edges.get()
-                if edge not in self.inactive_edges:
-                    third_point_idx = self.pivot(edge)
-
-                    if (third_point_idx) and (
-                        (third_point_idx not in self.used_points)
-                        or (self.in_front(third_point_idx))
+                print("Edge: {}".format(edge))
+                if frozenset((edge.p1, edge.p2)) not in self.inactive_edges:
+                    pivot_result = self.pivot(edge)
+                    if (pivot_result) and (
+                        (pivot_result[0] not in self.used_points)
+                        or (self.in_front(pivot_result[0]))
                     ):
-                        self.add_triangle(edge, third_point_idx)
+                        print("Found Pivot: {}".format(pivot_result))
+                        pi, center, normal = pivot_result
+                        self.add_triangle(edge, pi, center, normal)
                     else:
-                        self.inactive_edges.add(edge)
+                        print(
+                            "Found Pivot {} is in the used points or the not in the front edges".format(
+                                pivot_result[0] if pivot_result else None
+                            )
+                        )
+                        self.inactive_edges.add(frozenset((edge.p1, edge.p2)))
+                print()
+                # complete = True
 
             new_seed = self.find_seed_triangle()
             if new_seed:
-                p1, p2, p3 = new_seed
-                self.add_triangle(Edge(p1, p2), p3)
-                # Add the edges to the queue
-                self.active_edges.put(Edge(p1, p2))  # TODO ADD CENTER HERE
-                self.active_edges.put(Edge(p1, p3))
-                self.active_edges.put(Edge(p2, p3))
-                # Add the edges to the front
-                self.front_edges.add(Edge(p1, p2))
-                self.front_edges.add(Edge(p1, p3))
-                self.front_edges.add(Edge(p2, p3))
+                (p1, p2, p3), circumcenter, circumrad = new_seed
+
+                # Calc the Normal have it point away from the centroid
+                centroid = np.mean(cloud, axis=0)
+                cent_to_mid = circumcenter - centroid
+                normal = calc_triangle_normal(
+                    cent_to_mid, cloud[p1], cloud[p2], cloud[p3]
+                )
+                ball_center = (
+                    circumcenter + np.sqrt(self._rad ** 2 - circumrad ** 2) * normal
+                )
+
+                self.active_edges.put(Edge(p1, p2, ball_center, normal))
+                self.front_edges.add(frozenset((p1, p2)))
+                self.used_points.add(p1)
+                self.used_points.add(p2)
+                self.add_triangle(
+                    Edge(p1, p2, ball_center, normal), p3, ball_center, normal
+                )
             else:
                 complete = True
 
@@ -147,6 +216,23 @@ class BallPivot(MeshAlgo):
         Returns true iff the point index is contained in any of the edges of the front
         """
         return pi in frozenset().union(*list(self.front_edges))
+
+    def check_ball_free_of_points(self, p1: int, p2: int, p3: int, center: np.ndarray):
+        nn = list(
+            set(
+                self.nearest_neighbors[p1]
+                + self.nearest_neighbors[p2]
+                + self.nearest_neighbors[p3]
+            )
+        )
+        nn = [n for n in nn if n < len(self.cloud)]
+        distances = [
+            euclidean(self.cloud[n], center)
+            for n in nn
+            if (n != p1) and (n != p2) and (n != p3)
+        ]
+
+        return np.all(np.array(distances) > self._rad)
 
     def pivot(self, edge: Edge) -> int:
         """
@@ -160,10 +246,11 @@ class BallPivot(MeshAlgo):
         Returns:
             The index of the first good point if it exists or None
         """
+        print("\nSTART OF PIVOT:")
         # Get the indices of the nearest neighbors
         nn = self.nearest_neighbors[edge.p1] + self.nearest_neighbors[edge.p2]
         # Remove indies that are too large (filler in the nn matrix)
-        nn = [n for n in nn if n == len(self.cloud)]
+        nn = [n for n in nn if n < len(self.cloud)]
 
         C = self.cloud[edge.p1]  # Point C in the triangle
         B = self.cloud[edge.p2]  # Point B in the triangle
@@ -176,46 +263,52 @@ class BallPivot(MeshAlgo):
             circumcenter, circumrad = calc_circumcircle(A, B, C)
             if circumrad <= self._rad:
                 # Calculate the ball center
-                n = np.array([0, 0, 1])  # TODO figure out how to get normal vector
+                n = calc_triangle_normal(edge.triangle_normal, A, B, C)
                 ball_center = (
-                    circumcenter + np.sqrt(self._rad ** 2 - circumrad ** 2) @ n
+                    circumcenter + np.sqrt(self._rad ** 2 - circumrad ** 2) * n
                 )
 
-                bcent_point_pairs.append([pi, ball_center])
+                bcent_point_pairs.append([pi, ball_center, n])
 
-        # Lets sort all of the potential balls by their position along the gamma trajectory
-        midpt = midpoint(B, C)
-        # First look at centers such that (c-m) points in the same direction as the previous normal
-        upper_pairs = [
-            pair
-            for pair in bcent_point_pairs
-            if ((pair[1] - midpt) @ edge.prev_normal) > 0
-        ]
-        # Then sort them based on the distance from the center to prev point
-        upper_pairs.sort(key=lambda p, prev=edge.ball_center: euclidean(p[1], prev))
-        # Next look at the centers such that the (c-m) vector points in the opposite direction as the prev normal
-        lower_pairs = [
-            pair
-            for pair in bcent_point_pairs
-            if ((pair[1] - midpt) @ edge.prev_normal) <= 0
-        ]
-        # Sort these lower pairs off of the reverse distance
-        lower_pairs.sort(
-            key=lambda p, prev=edge.ball_center: euclidean(p[1], prev), reverse=True
+        print("Number of pairs: {}".format(len(bcent_point_pairs)))
+        bcent_point_pairs.sort(
+            key=lambda bc, prev=edge.ball_center: euclidean(bc[1], prev)
         )
-
+        midpt = midpoint(B, C)
         # Iterate over the ordered pairs, return the first one that doesnt violate any condtions
-        for pi, center in upper_pairs + lower_pairs:
-            distances = [
-                euclidean(self.cloud[n], center)
-                for n in nn
-                if (n != edge.p1) and (n != edge.p2) and (n != pi)
-            ]
-            if np.all(np.array(distances) > self._rad):
-                return pi
+
+        for pi, center, normal in bcent_point_pairs:
+            nn = list(
+                set(
+                    self.nearest_neighbors[pi]
+                    + self.nearest_neighbors[edge.p1]
+                    + self.nearest_neighbors[edge.p2]
+                )
+            )
+            nn = [n for n in nn if n < len(self.cloud)]
+            free_of_points = self.check_ball_free_of_points(
+                edge.p1, edge.p2, pi, center
+            )
+            not_the_prev_center = not np.allclose(center, edge.ball_center)
+            good_pt = free_of_points and not_the_prev_center
+
+            plot_pivot(
+                "good pt" if good_pt else "BAD",
+                self.cloud[pi],
+                B,
+                C,
+                center,
+                self._rad,
+                self.cloud[nn],
+            )
+
+            if good_pt:
+                return pi, center, normal
         return None
 
-    def add_triangle(self, edge: Edge, point_index: int) -> None:
+    def add_triangle(
+        self, edge: Edge, point_index: int, center: np.ndarray, normal: np.ndarray
+    ) -> None:
         """
         Adds a triangle constructed from Edge and point to the mesh
 
@@ -233,25 +326,28 @@ class BallPivot(MeshAlgo):
         self.mesh.add_triangle(
             (self.cloud[point_index], self.cloud[edge.p1], self.cloud[edge.p2])
         )
+        # self.mesh.save_mesh("mesh_series/{}.ply".format(len(self.used_points)))
         # House keep the tracking information
         self.used_points.add(point_index)
 
         # For the two new edges check if they need to get added to the front
         for new_edge in [
-            frozenset(point_index, edge.p1),
-            frozenset(point_index, edge.p2),
+            frozenset((point_index, edge.p1)),
+            frozenset((point_index, edge.p2)),
         ]:
+
             if new_edge in self.front_edges:
                 self.front_edges.remove(new_edge)
                 self.inactive_edges.add(new_edge)
             else:
+                (p1, p2) = new_edge
                 self.front_edges.add(new_edge)
-                self.active_edges.put(new_edge)
+                self.active_edges.put(Edge(p1, p2, center, normal))
         # Remove the previous front edge from the front
-        self.front_edges.remove(frozenset(edge.p1, edge.p2))
-        self.inactive_edges.add(frozenset(edge.p1, edge.p2))
+        self.front_edges.remove(frozenset((edge.p1, edge.p2)))
+        self.inactive_edges.add(frozenset((edge.p1, edge.p2)))
 
-    def find_seed_triangle(self):
+    def find_seed_triangle(self) -> Tuple[Tuple[int, int, int], Point, float]:
         """
         Finds a seed triangle from the cloud consisting of points that are not yet used
 
@@ -271,7 +367,9 @@ class BallPivot(MeshAlgo):
                 center, rad = calc_circumcircle(
                     self.cloud[p], self.cloud[n1], self.cloud[n2]
                 )
-                if rad < self._rad:
-                    return (p, n2, n2)
+                if rad < self._rad and self.check_ball_free_of_points(
+                    p, n1, n2, center
+                ):
+                    return ((p, n1, n2), center, rad)
 
         return None

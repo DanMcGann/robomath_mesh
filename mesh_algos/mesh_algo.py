@@ -43,9 +43,9 @@ class Mesh:
         """
         vert_indices = []
         for p in triangle:
-            if p not in self.vertices:
-                self.vertices[p] = len(self.vertices)
-            vert_indices.append(self.vertices[p])
+            if tuple(p) not in self.vertices:
+                self.vertices[tuple(p)] = len(self.vertices)
+            vert_indices.append(self.vertices[tuple(p)])
         self.faces.append(np.array(vert_indices))
 
     def save_mesh(self, out_file: str):
@@ -77,7 +77,7 @@ def load_cloud_from_xyz(file_name: str) -> np.ndarray:
     """
     return pcl.load_XYZI(
         file_name
-    ).to_array()  # TODO Will this work with a .xyz or just with a .xyzi
+    ).to_array()  # TODO Will this work with a .xyz or just with a .xyzi IT SEEMS no -Dan 11/18
 
 
 """
