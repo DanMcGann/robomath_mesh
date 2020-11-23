@@ -8,7 +8,8 @@ from queue import Queue
 from typing import NamedTuple, Tuple
 from mesh_algos.mesh_algo import MeshAlgo, Point, Mesh
 from mesh_algos.utils import euclidean, midpoint
-from scipy.spatial import KDTree
+from scipy.spatial import cKDTree as KDTree
+from sklearn.neighbors import NearestNeighbors
 import matplotlib.pyplot as plt
 
 """
@@ -157,8 +158,10 @@ class BallPivot(MeshAlgo):
         complete = False
 
         # Pre-Calculate the Knn for the cloud using a KD tree
-        kdtree = KDTree(cloud)
-        _, nearest_neighbors = kdtree.query(cloud, k=100)
+        nbrs = NearestNeighbors(
+            n_neighbors=20, radius=self._rad * 2, algorithm="ball_tree"
+        ).fit(self.cloud)
+        _, nearest_neighbors = nbrs.kneighbors(self.cloud)
         # Remove self points from nn
         self.nearest_neighbors = nearest_neighbors[:, 1:]
 
@@ -188,7 +191,7 @@ class BallPivot(MeshAlgo):
             new_seed = self.find_seed_triangle()
             if new_seed:
                 (p1, p2, p3), circumcenter, circumrad = new_seed
-
+                print("NEW SEED")
                 # Calc the Normal have it point away from the centroid
                 centroid = np.mean(cloud, axis=0)
                 cent_to_mid = circumcenter - centroid
@@ -220,12 +223,32 @@ class BallPivot(MeshAlgo):
     def check_ball_free_of_points(self, p1: int, p2: int, p3: int, center: np.ndarray):
         nn = list(
             set(
-                self.nearest_neighbors[p1]
-                + self.nearest_neighbors[p2]
-                + self.nearest_neighbors[p3]
+                np.concatenate(
+                    (
+                        self.nearest_neighbors[p1],
+                        self.nearest_neighbors[p2],
+                        self.nearest_neighbors[p3],
+                    )
+                )
             )
         )
         nn = [n for n in nn if n < len(self.cloud)]
+
+        """ PLOT NEAREST NEIGHBORS AND NOT NEAREST NEIGHBORS """
+        """
+        fig = plt.figure()
+        ax = fig.gca(projection="3d")
+        not_neighbors = list(set(list(range(len(self.cloud)))) - set(nn))
+        nn_pts = self.cloud[nn]
+        not_nn_pts = self.cloud[not_neighbors]
+        ax.scatter(nn_pts.T[0], nn_pts.T[1], nn_pts.T[2], c="red")
+        ax.scatter(not_nn_pts.T[0], not_nn_pts.T[1], not_nn_pts.T[2], c="blue")
+        triangle = np.array([p1, p2, p3, p1])
+        triangle = self.cloud[triangle]
+        ax.plot(triangle.T[0], triangle.T[1], triangle.T[2], c="pink")
+        set_axes_equal(ax)
+        plt.show()
+        """
         distances = [
             euclidean(self.cloud[n], center)
             for n in nn
@@ -248,7 +271,9 @@ class BallPivot(MeshAlgo):
         """
         print("\nSTART OF PIVOT:")
         # Get the indices of the nearest neighbors
-        nn = self.nearest_neighbors[edge.p1] + self.nearest_neighbors[edge.p2]
+        nn = np.concatenate(
+            (self.nearest_neighbors[edge.p1], self.nearest_neighbors[edge.p2])
+        )
         # Remove indies that are too large (filler in the nn matrix)
         nn = [n for n in nn if n < len(self.cloud)]
 
@@ -280,9 +305,13 @@ class BallPivot(MeshAlgo):
         for pi, center, normal in bcent_point_pairs:
             nn = list(
                 set(
-                    self.nearest_neighbors[pi]
-                    + self.nearest_neighbors[edge.p1]
-                    + self.nearest_neighbors[edge.p2]
+                    np.concatenate(
+                        (
+                            self.nearest_neighbors[pi],
+                            self.nearest_neighbors[edge.p1],
+                            self.nearest_neighbors[edge.p2],
+                        )
+                    )
                 )
             )
             nn = [n for n in nn if n < len(self.cloud)]
@@ -291,7 +320,7 @@ class BallPivot(MeshAlgo):
             )
             not_the_prev_center = not np.allclose(center, edge.ball_center)
             good_pt = free_of_points and not_the_prev_center
-
+            """
             plot_pivot(
                 "good pt" if good_pt else "BAD",
                 self.cloud[pi],
@@ -301,7 +330,7 @@ class BallPivot(MeshAlgo):
                 self._rad,
                 self.cloud[nn],
             )
-
+            """
             if good_pt:
                 return pi, center, normal
         return None
@@ -367,9 +396,7 @@ class BallPivot(MeshAlgo):
                 center, rad = calc_circumcircle(
                     self.cloud[p], self.cloud[n1], self.cloud[n2]
                 )
-                if rad < self._rad and self.check_ball_free_of_points(
-                    p, n1, n2, center
-                ):
+                if rad:
                     return ((p, n1, n2), center, rad)
 
         return None
