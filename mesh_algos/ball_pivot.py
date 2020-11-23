@@ -3,17 +3,24 @@ Implementation of the ball pivot Algorithm from...
 https://ieeexplore.ieee.org/document/817351
 https://pdfs.semanticscholar.org/8ec0/d70299f83ccb98ad593a1b581deb018cbfe2.pdf
 """
-import numpy as np
 from queue import Queue
-from typing import NamedTuple, Tuple
-from mesh_algos.mesh_algo import MeshAlgo, Point, Mesh
-from mesh_algos.utils import euclidean, midpoint
-from scipy.spatial import cKDTree as KDTree
-from sklearn.neighbors import NearestNeighbors
+from typing import Iterable, NamedTuple, Tuple
+
 import matplotlib.pyplot as plt
+import numpy as np
+from sklearn.neighbors import NearestNeighbors
+
+from mesh_algos.mesh_algo import Mesh, MeshAlgo, Point
+from mesh_algos.utils import euclidean, set_axes_equal
 
 """
-Data Definitions
+########     ###    ########    ###        ########  ######## ########
+##     ##   ## ##      ##      ## ##       ##     ## ##       ##
+##     ##  ##   ##     ##     ##   ##      ##     ## ##       ##
+##     ## ##     ##    ##    ##     ##     ##     ## ######   ######
+##     ## #########    ##    #########     ##     ## ##       ##
+##     ## ##     ##    ##    ##     ##     ##     ## ##       ##
+########  ##     ##    ##    ##     ##     ########  ######## ##
 """
 
 """ EDGE
@@ -39,41 +46,21 @@ Note: If there are not k nearest neighbors the row will be padded with values eq
 
 
 """
-Helper Functions
+##     ## ######## ##       ########  ######## ########   ######
+##     ## ##       ##       ##     ## ##       ##     ## ##    ##
+##     ## ##       ##       ##     ## ##       ##     ## ##
+######### ######   ##       ########  ######   ########   ######
+##     ## ##       ##       ##        ##       ##   ##         ##
+##     ## ##       ##       ##        ##       ##    ##  ##    ##
+##     ## ######## ######## ##        ######## ##     ##  ######
 """
 
 
-def set_axes_equal(ax):
-    # https://stackoverflow.com/questions/13685386/matplotlib-equal-unit-length-with-equal-aspect-ratio-z-axis-is-not-equal-to
-    """Make axes of 3D plot have equal scale so that spheres appear as spheres,
-    cubes as cubes, etc..  This is one possible solution to Matplotlib's
-    ax.set_aspect('equal') and ax.axis('equal') not working for 3D.
-
-    Input
-      ax: a matplotlib axis, e.g., as output from plt.gca().
-    """
-
-    x_limits = ax.get_xlim3d()
-    y_limits = ax.get_ylim3d()
-    z_limits = ax.get_zlim3d()
-
-    x_range = abs(x_limits[1] - x_limits[0])
-    x_middle = np.mean(x_limits)
-    y_range = abs(y_limits[1] - y_limits[0])
-    y_middle = np.mean(y_limits)
-    z_range = abs(z_limits[1] - z_limits[0])
-    z_middle = np.mean(z_limits)
-
-    # The plot bounding box is a sphere in the sense of the infinity
-    # norm, hence I call half the max range the plot radius.
-    plot_radius = 0.5 * max([x_range, y_range, z_range])
-
-    ax.set_xlim3d([x_middle - plot_radius, x_middle + plot_radius])
-    ax.set_ylim3d([y_middle - plot_radius, y_middle + plot_radius])
-    ax.set_zlim3d([z_middle - plot_radius, z_middle + plot_radius])
-
-
 def plot_pivot(title, a, b, c, center, radius, nn):
+    """
+    Plots the geometry of a pivot operation. Displays the ball post pivot
+    the points used in the triangle and the neighbors
+    """
     fig = plt.figure()
     ax = fig.gca(projection="3d")
 
@@ -97,15 +84,16 @@ def calc_circumcircle(A: Point, B: Point, C: Point) -> Tuple[Point, float]:
     Calculate the Circumcircle of the three points
     returns the circumcenter of the circle (np.ndarray[x,y,z]), and the circum radius (float)
     """
-    a, b, c = euclidean(B, C), euclidean(A, C), euclidean(A, B)
-    circumrad = np.sqrt(
-        ((a * b * c) ** 2) / ((a + b + c) * (b + c - a) * (c + a - b) * (a + b - c))
-    )
-    ha = (a ** 2) * (b ** 2 + c ** 2 - a ** 2)
-    hb = (b ** 2) * (c ** 2 + a ** 2 - b ** 2)
-    hc = (c ** 2) * (a ** 2 + b ** 2 - c ** 2)
-    circumcenter = (ha * A + hb * B + hc * C) / (ha + hb + hc)
-    return circumcenter, circumrad
+    with np.errstate(divide="ignore", invalid="ignore"):
+        a, b, c = euclidean(B, C), euclidean(A, C), euclidean(A, B)
+        circumrad = np.sqrt(
+            ((a * b * c) ** 2) / ((a + b + c) * (b + c - a) * (c + a - b) * (a + b - c))
+        )
+        ha = (a ** 2) * (b ** 2 + c ** 2 - a ** 2)
+        hb = (b ** 2) * (c ** 2 + a ** 2 - b ** 2)
+        hc = (c ** 2) * (a ** 2 + b ** 2 - c ** 2)
+        circumcenter = (ha * A + hb * B + hc * C) / (ha + hb + hc)
+        return circumcenter, circumrad
 
 
 def calc_triangle_normal(
@@ -122,25 +110,37 @@ def calc_triangle_normal(
     return pos_norm if (pos_norm @ prev_normal > 0) else neg_norm
 
 
+"""
+########     ###    ##       ##       ########  #### ##     ##  #######  ########
+##     ##   ## ##   ##       ##       ##     ##  ##  ##     ## ##     ##    ##
+##     ##  ##   ##  ##       ##       ##     ##  ##  ##     ## ##     ##    ##
+########  ##     ## ##       ##       ########   ##  ##     ## ##     ##    ##
+##     ## ######### ##       ##       ##         ##   ##   ##  ##     ##    ##
+##     ## ##     ## ##       ##       ##         ##    ## ##   ##     ##    ##
+########  ##     ## ######## ######## ##        ####    ###     #######     ##
+"""
+
+
 class BallPivot(MeshAlgo):
     """
     Algorithm for generating a mesh from a point cloud by rolling a ball along
     the exterior surface of the cloud.
     """
 
-    def __init__(self, ball_radius: float):
+    def __init__(self, ball_radius: float, vis: bool = False):
         """
         Constructor:
             - ball_radius: The radius (m) of the ball that will be used to pivot over the cloud
         """
         self.mesh = Mesh()
-        self._rad = ball_radius
+        self.rad = ball_radius
         self.cloud = np.array([])
         self.active_edges = Queue()
         self.used_points = set()
         self.front_edges = set()
         self.inactive_edges = set()
         self.nearest_neighbors = np.array([])
+        self.vis = vis
 
     def generate_mesh(self, cloud: np.ndarray) -> Mesh:
         """ Required from @MeshAlgo"""
@@ -159,7 +159,7 @@ class BallPivot(MeshAlgo):
 
         # Pre-Calculate the Knn for the cloud using a KD tree
         nbrs = NearestNeighbors(
-            n_neighbors=20, radius=self._rad * 2, algorithm="ball_tree"
+            n_neighbors=20, radius=self.rad * 2, algorithm="ball_tree"
         ).fit(self.cloud)
         _, nearest_neighbors = nbrs.kneighbors(self.cloud)
         # Remove self points from nn
@@ -168,40 +168,20 @@ class BallPivot(MeshAlgo):
         while not complete:
             while not self.active_edges.empty():
                 edge = self.active_edges.get()
-                print("Edge: {}".format(edge))
                 if frozenset((edge.p1, edge.p2)) not in self.inactive_edges:
                     pivot_result = self.pivot(edge)
                     if (pivot_result) and (
                         (pivot_result[0] not in self.used_points)
                         or (self.in_front(pivot_result[0]))
                     ):
-                        print("Found Pivot: {}".format(pivot_result))
                         pi, center, normal = pivot_result
                         self.add_triangle(edge, pi, center, normal)
                     else:
-                        print(
-                            "Found Pivot {} is in the used points or the not in the front edges".format(
-                                pivot_result[0] if pivot_result else None
-                            )
-                        )
                         self.inactive_edges.add(frozenset((edge.p1, edge.p2)))
-                print()
-                # complete = True
 
             new_seed = self.find_seed_triangle()
             if new_seed:
-                (p1, p2, p3), circumcenter, circumrad = new_seed
-                print("NEW SEED")
-                # Calc the Normal have it point away from the centroid
-                centroid = np.mean(cloud, axis=0)
-                cent_to_mid = circumcenter - centroid
-                normal = calc_triangle_normal(
-                    cent_to_mid, cloud[p1], cloud[p2], cloud[p3]
-                )
-                ball_center = (
-                    circumcenter + np.sqrt(self._rad ** 2 - circumrad ** 2) * normal
-                )
-
+                ((p1, p2, p3), ball_center, normal) = new_seed
                 self.active_edges.put(Edge(p1, p2, ball_center, normal))
                 self.front_edges.add(frozenset((p1, p2)))
                 self.used_points.add(p1)
@@ -220,42 +200,33 @@ class BallPivot(MeshAlgo):
         """
         return pi in frozenset().union(*list(self.front_edges))
 
-    def check_ball_free_of_points(self, p1: int, p2: int, p3: int, center: np.ndarray):
-        nn = list(
-            set(
-                np.concatenate(
-                    (
-                        self.nearest_neighbors[p1],
-                        self.nearest_neighbors[p2],
-                        self.nearest_neighbors[p3],
-                    )
-                )
-            )
-        )
-        nn = [n for n in nn if n < len(self.cloud)]
+    def get_nn(self, pts: Iterable[int]):
+        """
+        Takes a iterable of point indices, and returns the indices of their nearest neighbors
+        """
+        list_of_neighbors = [self.nearest_neighbors[pi] for pi in pts]
+        nn = np.unique(np.concatenate(list_of_neighbors))
+        return nn[nn < self.cloud.shape[0]]
 
-        """ PLOT NEAREST NEIGHBORS AND NOT NEAREST NEIGHBORS """
+    def check_ball_free_of_points(self, p1: int, p2: int, p3: int, center: Point):
         """
-        fig = plt.figure()
-        ax = fig.gca(projection="3d")
-        not_neighbors = list(set(list(range(len(self.cloud)))) - set(nn))
-        nn_pts = self.cloud[nn]
-        not_nn_pts = self.cloud[not_neighbors]
-        ax.scatter(nn_pts.T[0], nn_pts.T[1], nn_pts.T[2], c="red")
-        ax.scatter(not_nn_pts.T[0], not_nn_pts.T[1], not_nn_pts.T[2], c="blue")
-        triangle = np.array([p1, p2, p3, p1])
-        triangle = self.cloud[triangle]
-        ax.plot(triangle.T[0], triangle.T[1], triangle.T[2], c="pink")
-        set_axes_equal(ax)
-        plt.show()
+        Checks that no point lies within a given ball.
+        For efficiency lets check only the points close to the triangle of the ball
+        Params:
+            p1,p2,p3 the indicies of the points used to calculate the ball center
+            center: the center of the ball
+        returns true iff the ball is free of points
         """
+        nn = self.get_nn((p1, p2, p3))
+
+        nn = [n for n in nn if n < len(self.cloud)]
         distances = [
             euclidean(self.cloud[n], center)
             for n in nn
             if (n != p1) and (n != p2) and (n != p3)
         ]
 
-        return np.all(np.array(distances) > self._rad)
+        return np.all(np.array(distances) > self.rad)
 
     def pivot(self, edge: Edge) -> int:
         """
@@ -269,13 +240,8 @@ class BallPivot(MeshAlgo):
         Returns:
             The index of the first good point if it exists or None
         """
-        print("\nSTART OF PIVOT:")
         # Get the indices of the nearest neighbors
-        nn = np.concatenate(
-            (self.nearest_neighbors[edge.p1], self.nearest_neighbors[edge.p2])
-        )
-        # Remove indies that are too large (filler in the nn matrix)
-        nn = [n for n in nn if n < len(self.cloud)]
+        nn = self.get_nn((edge.p1, edge.p2))
 
         C = self.cloud[edge.p1]  # Point C in the triangle
         B = self.cloud[edge.p2]  # Point B in the triangle
@@ -286,51 +252,32 @@ class BallPivot(MeshAlgo):
             A = self.cloud[pi]
             # Calculate the circum radius To determine if the point can form a triangle
             circumcenter, circumrad = calc_circumcircle(A, B, C)
-            if circumrad <= self._rad:
+            if circumrad <= self.rad:
                 # Calculate the ball center
                 n = calc_triangle_normal(edge.triangle_normal, A, B, C)
-                ball_center = (
-                    circumcenter + np.sqrt(self._rad ** 2 - circumrad ** 2) * n
-                )
+                ball_center = circumcenter + np.sqrt(self.rad ** 2 - circumrad ** 2) * n
 
                 bcent_point_pairs.append([pi, ball_center, n])
 
-        print("Number of pairs: {}".format(len(bcent_point_pairs)))
+        # Sort the points in order of distance along he trajectory
         bcent_point_pairs.sort(
-            key=lambda bc, prev=edge.ball_center: euclidean(bc[1], prev)
+            key=lambda bcp, prev=edge.ball_center: euclidean(bcp[1], prev)
         )
-        midpt = midpoint(B, C)
-        # Iterate over the ordered pairs, return the first one that doesnt violate any condtions
 
         for pi, center, normal in bcent_point_pairs:
-            nn = list(
-                set(
-                    np.concatenate(
-                        (
-                            self.nearest_neighbors[pi],
-                            self.nearest_neighbors[edge.p1],
-                            self.nearest_neighbors[edge.p2],
-                        )
-                    )
-                )
-            )
-            nn = [n for n in nn if n < len(self.cloud)]
+            # Check the conditions of for the pivot
+            nn = self.get_nn((pi, edge.p1, edge.p2))
             free_of_points = self.check_ball_free_of_points(
                 edge.p1, edge.p2, pi, center
             )
             not_the_prev_center = not np.allclose(center, edge.ball_center)
             good_pt = free_of_points and not_the_prev_center
-            """
-            plot_pivot(
-                "good pt" if good_pt else "BAD",
-                self.cloud[pi],
-                B,
-                C,
-                center,
-                self._rad,
-                self.cloud[nn],
-            )
-            """
+            if self.vis:
+                title = "Good Pivot" if good_pt else "Invalid Pivot"
+                plot_pivot(
+                    title, self.cloud[pi], B, C, center, self.rad, self.cloud[nn]
+                )
+
             if good_pt:
                 return pi, center, normal
         return None
@@ -355,7 +302,6 @@ class BallPivot(MeshAlgo):
         self.mesh.add_triangle(
             (self.cloud[point_index], self.cloud[edge.p1], self.cloud[edge.p2])
         )
-        # self.mesh.save_mesh("mesh_series/{}.ply".format(len(self.used_points)))
         # House keep the tracking information
         self.used_points.add(point_index)
 
@@ -393,10 +339,20 @@ class BallPivot(MeshAlgo):
             # Look at their two closest neighbors
             n1, n2 = self.nearest_neighbors[p][0:2]
             if n1 < len(self.cloud) and n2 < len(self.cloud):
-                center, rad = calc_circumcircle(
+                circumcenter, circumrad = calc_circumcircle(
                     self.cloud[p], self.cloud[n1], self.cloud[n2]
                 )
-                if rad:
-                    return ((p, n1, n2), center, rad)
+                if circumrad < self.rad:
+                    centroid = np.mean(self.cloud, axis=0)
+                    cent_to_mid = circumcenter - centroid
+                    normal = calc_triangle_normal(
+                        cent_to_mid, self.cloud[p], self.cloud[n1], self.cloud[n2]
+                    )
+                    ball_center = (
+                        circumcenter + np.sqrt(self.rad ** 2 - circumrad ** 2) * normal
+                    )
+
+                    if self.check_ball_free_of_points(p, n1, n2, ball_center):
+                        return ((p, n1, n2), ball_center, normal)
 
         return None

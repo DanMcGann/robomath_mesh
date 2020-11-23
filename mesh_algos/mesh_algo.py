@@ -4,16 +4,22 @@ This file contains a base class for all the mesh generation algorithms.
 
 
 """
+import typing
 from abc import ABC
-import pymesh
+from collections import OrderedDict
 
 import numpy as np
 import pcl
-import typing
-from collections import OrderedDict
+import pymesh
 
 """
-Data Definitions
+########     ###    ########    ###       ########  ######## ########  ######
+##     ##   ## ##      ##      ## ##      ##     ## ##       ##       ##    ##
+##     ##  ##   ##     ##     ##   ##     ##     ## ##       ##       ##
+##     ## ##     ##    ##    ##     ##    ##     ## ######   ######    ######
+##     ## #########    ##    #########    ##     ## ##       ##             ##
+##     ## ##     ##    ##    ##     ##    ##     ## ##       ##       ##    ##
+########  ##     ##    ##    ##     ##    ########  ######## ##        ######
 """
 
 # A point in the cloud of form [x,y,z]
@@ -52,19 +58,25 @@ class Mesh:
         """
         Saves a generated mesh to file
         """
-        vertices = np.stack(self.vertices.keys())
+        vertices = np.stack(list(self.vertices.keys()))
         faces = np.stack(self.faces)
         pymesh.save_mesh_raw(out_file, vertices, faces)
 
 
 """
-Helper functions 
+##     ## ######## ##       ########  ######## ########   ######
+##     ## ##       ##       ##     ## ##       ##     ## ##    ##
+##     ## ##       ##       ##     ## ##       ##     ## ##
+######### ######   ##       ########  ######   ########   ######
+##     ## ##       ##       ##        ##       ##   ##         ##
+##     ## ##       ##       ##        ##       ##    ##  ##    ##
+##     ## ######## ######## ##        ######## ##     ##  ######
 """
 
 
-def load_cloud_from_pcd(file_name: str) -> np.ndarray:
+def load_cloud(file_name: str) -> np.ndarray:
     """
-    Loads a point cloud from a pcd file
+    Loads a point cloud from a pcd file or ply
     Returns the cloud as a numpy array of shape (N, 3) each row containing one [x,y,z] point
     """
     return pcl.load(file_name).to_array()
@@ -81,7 +93,13 @@ def load_cloud_from_xyz(file_name: str) -> np.ndarray:
 
 
 """
-Interface for Algorithms
+##     ## ########  ######  ##     ##            ###    ##        ######    #######  
+###   ### ##       ##    ## ##     ##           ## ##   ##       ##    ##  ##     ## 
+#### #### ##       ##       ##     ##          ##   ##  ##       ##        ##     ## 
+## ### ## ######    ######  #########         ##     ## ##       ##   #### ##     ## 
+##     ## ##             ## ##     ##         ######### ##       ##    ##  ##     ## 
+##     ## ##       ##    ## ##     ##         ##     ## ##       ##    ##  ##     ## 
+##     ## ########  ######  ##     ##         ##     ## ########  ######    #######  
 """
 
 
