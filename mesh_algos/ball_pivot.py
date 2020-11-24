@@ -5,10 +5,12 @@ https://pdfs.semanticscholar.org/8ec0/d70299f83ccb98ad593a1b581deb018cbfe2.pdf
 """
 from queue import Queue
 from typing import Iterable, NamedTuple, Tuple
+import random
 
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.neighbors import NearestNeighbors
+from scipy.spatial.distance import cdist
 
 from mesh_algos.mesh_algo import Mesh, MeshAlgo, Point
 from mesh_algos.utils import euclidean, set_axes_equal
@@ -167,6 +169,7 @@ class BallPivot(MeshAlgo):
 
         while not complete:
             while not self.active_edges.empty():
+                print(len(self.used_points))
                 edge = self.active_edges.get()
                 if frozenset((edge.p1, edge.p2)) not in self.inactive_edges:
                     pivot_result = self.pivot(edge)
@@ -181,6 +184,7 @@ class BallPivot(MeshAlgo):
 
             new_seed = self.find_seed_triangle()
             if new_seed:
+                print(len(self.used_points))
                 ((p1, p2, p3), ball_center, normal) = new_seed
                 self.active_edges.put(Edge(p1, p2, ball_center, normal))
                 self.front_edges.add(frozenset((p1, p2)))
@@ -204,8 +208,10 @@ class BallPivot(MeshAlgo):
         """
         Takes a iterable of point indices, and returns the indices of their nearest neighbors
         """
-        list_of_neighbors = [self.nearest_neighbors[pi] for pi in pts]
-        nn = np.unique(np.concatenate(list_of_neighbors))
+        input_pts = np.array(pts)
+        matrix_of_neighbors = self.nearest_neighbors[input_pts]
+        nn = np.unique(matrix_of_neighbors.flatten())
+        nn = np.setdiff1d(nn, input_pts)
         return nn[nn < self.cloud.shape[0]]
 
     def check_ball_free_of_points(self, p1: int, p2: int, p3: int, center: Point):
@@ -218,15 +224,8 @@ class BallPivot(MeshAlgo):
         returns true iff the ball is free of points
         """
         nn = self.get_nn((p1, p2, p3))
-
-        nn = [n for n in nn if n < len(self.cloud)]
-        distances = [
-            euclidean(self.cloud[n], center)
-            for n in nn
-            if (n != p1) and (n != p2) and (n != p3)
-        ]
-
-        return np.all(np.array(distances) > self.rad)
+        distances = cdist(np.array([center]), self.cloud[nn])[0]
+        return np.all(distances > self.rad)
 
     def pivot(self, edge: Edge) -> int:
         """
@@ -334,6 +333,7 @@ class BallPivot(MeshAlgo):
             (p1,p2,p3) The points of the triangle OR None
         """
         unused_pts = list(set(list(range(len(self.cloud)))) - self.used_points)
+        random.shuffle(unused_pts)
         # Check all of our unsed points
         for p in unused_pts:
             # Look at their two closest neighbors

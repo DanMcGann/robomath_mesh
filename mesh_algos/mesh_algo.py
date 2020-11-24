@@ -87,9 +87,11 @@ def load_cloud_from_xyz(file_name: str) -> np.ndarray:
     Loads a point cloud from a xyz file
     Returns the cloud as a numpy array of shape (N, 3) each row containing one [x,y,z] point
     """
-    return pcl.load_XYZI(
-        file_name
-    ).to_array()  # TODO Will this work with a .xyz or just with a .xyzi IT SEEMS no -Dan 11/18
+    pts = []
+    with open(file_name, "r") as file:
+        for line in file.readlines():
+            pts.append(np.array(list(map(float, line.split()[0:]))))
+    return np.stack(pts)
 
 
 """
