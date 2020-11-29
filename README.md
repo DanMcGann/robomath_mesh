@@ -13,5 +13,13 @@ Code for Robomath final project exploring mesh generation from pointclouds.
 # Dependencies
 * python3
 * python-pcl
-    * `apt-get install python3-pcl` note: the pip version doesnt appear to work
+    * Used for loading `pcd` and `xyz` point cloud files
+    * `apt-get install python3-pcl` note: the pip version doesn't appear to work
+* pymesh
+    * used for unparsing meshes into `obj` or `ply` or `stl` files. 
+    * [Instillaton Guide](https://pymesh.readthedocs.io/en/latest/installation.html)
+    * Note: I had to change the `setup.py` and `thirdparty/build.py` hashbangs to `python3`
+    * Instillation: Had to force `-j1` compilation flag in `setup.py`
 
+# Formatting
+* https://pypi.org/project/black/
